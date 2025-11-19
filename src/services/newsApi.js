@@ -1,102 +1,47 @@
-import axios from "axios";
+const PROXY = "https://api.allorigins.win/raw?url=";
 
-let viteKey;
-try {
-  viteKey = import.meta?.env?.VITE_MEDIASTACK_API_KEY;
-} catch (e) {
-  viteKey = undefined;
-}
+const TOP_RSS = "https://feeds.bbci.co.uk/news/rss.xml";
 
-const API_KEY =
-  (typeof process !== "undefined" &&
-    process.env &&
-    process.env.REACT_APP_MEDIASTACK_API_KEY) ||
-  viteKey ||
-  (typeof window !== "undefined" && window.__MEDIASTACK_API_KEY) ||
-  "YOUR_API_KEY";
+const SEARCH_RSS = "https://feeds.bbci.co.uk/news/search/rss?q=";
 
-const KEY_SOURCE = (() => {
-  if (
-    typeof process !== "undefined" &&
-    process.env &&
-    process.env.REACT_APP_MEDIASTACK_API_KEY
-  )
-    return "process.env";
-  if (viteKey) return "import.meta.env";
-  if (typeof window !== "undefined" && window.__MEDIASTACK_API_KEY)
-    return "window.__MEDIASTACK_API_KEY";
-  return null;
-})();
+const parseRss = async (url) => {
+  try {
+    const response = await fetch(PROXY + encodeURIComponent(url));
+    if (!response.ok) return [];
 
-if (KEY_SOURCE) {
-  const masked =
-    API_KEY === "YOUR_API_KEY"
-      ? "placeholder"
-      : `${API_KEY.slice(0, 4)}...${API_KEY.slice(-4)}`;
-  console.debug(`MediaStack key detected from ${KEY_SOURCE}:`, masked);
-} else {
-  console.error(
-    "MediaStack API key is missing or not set. Set REACT_APP_MEDIASTACK_API_KEY (CRA), VITE_MEDIASTACK_API_KEY (Vite) or window.__MEDIASTACK_API_KEY."
-  );
-}
+    const text = await response.text();
+    const xml = new DOMParser().parseFromString(text, "text/xml");
+    const items = xml.querySelectorAll("item");
 
-const BASE_URL = "https://api.mediastack.com/v1";
-
-const hasValidKey = () => !!API_KEY && API_KEY !== "YOUR_API_KEY";
-
-const handleAxiosError = (error, context) => {
-  const status = error?.response?.status;
-  if (status === 401) {
-    console.error(
-      `${context}: 401 Unauthorized — check your MediaStack API key.`
-    );
-  } else {
-    console.error(`${context}:`, error);
+    return Array.from(items)
+      .slice(0, 20)
+      .map((item) => ({
+        title: item.querySelector("title")?.textContent || "Без заголовка",
+        description:
+          item.querySelector("description")?.textContent ||
+          item.querySelector("description")?.textContent ||
+          "",
+        url: item.querySelector("link")?.textContent || "#",
+        publishedAt:
+          item.querySelector("pubDate")?.textContent ||
+          new Date().toISOString(),
+        source: { name: "BBC News" },
+        image:
+          item.querySelector("enclosure")?.getAttribute("url") ||
+          item.querySelector("thumbnail")?.getAttribute("url") ||
+          null,
+      }));
+  } catch (err) {
+    console.warn("RSS не завантажився, повертаю порожній масив");
+    return [];
   }
 };
 
-export const getTopHeadlines = async (category = "general", country = "us") => {
-  if (!hasValidKey()) {
-    console.error(
-      "MediaStack API key is missing or not set. Set REACT_APP_MEDIASTACK_API_KEY (CRA), VITE_MEDIASTACK_API_KEY (Vite) or window.__MEDIASTACK_API_KEY."
-    );
-    return [];
-  }
-
-  try {
-    const response = await axios.get(`${BASE_URL}/news`, {
-      params: {
-        access_key: API_KEY,
-        countries: country,
-        categories: category,
-        limit: 20,
-      },
-    });
-    return response.data.data || [];
-  } catch (error) {
-    handleAxiosError(error, "Error fetching headlines");
-    return [];
-  }
+export const getTopHeadlines = async (country = "us", category = "general") => {
+  return await parseRss(TOP_RSS);
 };
 
 export const searchNews = async (query) => {
-  if (!hasValidKey()) {
-    console.error("MediaStack API key is missing or not set.");
-    return [];
-  }
-
-  try {
-    const response = await axios.get(`${BASE_URL}/news`, {
-      params: {
-        access_key: API_KEY,
-        keywords: query,
-        limit: 20,
-        sort: "published_desc",
-      },
-    });
-    return response.data.data || [];
-  } catch (error) {
-    handleAxiosError(error, "Error searching news");
-    return [];
-  }
+  if (!query?.trim()) return await getTopHeadlines();
+  return await parseRss(SEARCH_RSS + encodeURIComponent(query));
 };
